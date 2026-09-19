@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+config="${NOTIFY_CONFIG:-$HOME/.config/notify/config}"
+level="info"
+title=""
+
+usage() {
+    echo "usage: notify [-l debug|info|success|warning|error|critical] [-t title] <message>" >&2
+    exit 2
+}
+
+while getopts ":l:t:h" option; do
+    case "$option" in
+        l) level=$OPTARG ;;
+        t) title=$OPTARG ;;
+        *) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [ $# -ne 1 ]; then
+    usage
+fi
+
+case "$level" in
+    debug) emoji="bug" ;;
+    info) emoji="speech_balloon" ;;
+    success) emoji="white_check_mark" ;;
+    warning) emoji="warning" ;;
+    error) emoji="x" ;;
+    critical) emoji="rotating_light" ;;
+    *) echo "notify: unknown level '$level'" >&2; usage ;;
+esac
+
+if [ -f "$config" ]; then
+    . "$config"
+fi
+
+topic="${NOTIFY_TOPIC:-${topic:-}}"
+token="${NOTIFY_TOKEN:-${token:-}}"
+
+if [ -z "$topic" ] || [ -z "$token" ]; then
+    echo "notify: set topic and token in $config" >&2
+    exit 1
+fi
+
+host=$(hostname -s)
+
+if [ -n "$title" ]; then
+    title="$host: $title"
+else
+    title="$host"
+fi
+
+http_status=$(curl -fsS --max-time 20 --location --post301 --post302 --post303 \
+    -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $token" \
+    -H "Title: $title" \
+    -H "Tags: $emoji" \
+    --data-raw "$1" \
+    "$topic") || exit $?
+
+case "$http_status" in
+    2??) ;;
+    *) echo "notify: server returned HTTP $http_status" >&2; exit 1 ;;
+esac
